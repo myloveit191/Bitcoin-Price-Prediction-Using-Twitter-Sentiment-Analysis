@@ -7,7 +7,11 @@ from datetime import datetime, timedelta
 import json
 
 config = ConfigParser()
-config.read('config.ini')
+try:
+    with open('config.ini', 'r', encoding='utf-8') as f:
+        config.read_file(f)
+except FileNotFoundError:
+    config.read('config.ini')  # fallback
 
 def get_bitcoin_price_coingecko(start_date, end_date):
     """
@@ -157,7 +161,10 @@ def fetch_bitcoin_data():
         
         # Generate filename
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"bitcoin_price_data_{timestamp_str}.csv"
+        # Ensure data/bitcoin-price directory exists
+        import os
+        os.makedirs("data/bitcoin-price", exist_ok=True)
+        filename = f"data/bitcoin-price/bitcoin_price_data_{timestamp_str}.csv"
         
         # Export to CSV
         df.to_csv(filename, index=False)

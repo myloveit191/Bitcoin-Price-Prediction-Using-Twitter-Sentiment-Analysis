@@ -2,3 +2,4 @@ config.ini
 cookies.json
 .idea
 .vscode
+__pycache__

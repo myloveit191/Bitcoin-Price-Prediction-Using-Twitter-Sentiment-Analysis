@@ -10,22 +10,30 @@ from random import randint
 import os
 import json
 
-# Load config
+# Load config - sử dụng cách giống scraping.py
 config = ConfigParser()
-config.read('config.ini')
+try:
+    with open('config.ini', 'r', encoding='utf-8') as f:
+        config.read_file(f)
+except FileNotFoundError:
+    config.read('config.ini')  # fallback
+    
 username = config['X']['username']
 password = config['X']['password']
 email = config['X']['email']
 
-# Read scraping configuration
+# Read scraping configuration - copy từ scraping.py
 scraping_section = 'Scraping'
+min_tweets = config.getint(scraping_section, 'min_tweets', fallback=5000)
 start_date_str = config.get(scraping_section, 'start_date', fallback='2025-08-15')
 end_date_str = config.get(scraping_section, 'end_date', fallback='2025-09-15')
 keywords = config.get(scraping_section, 'keywords', fallback='bitcoin')
 lang = config.get(scraping_section, 'lang', fallback='en')
+provided_query = config.get(scraping_section, 'query', fallback='').strip()
 product = config.get(scraping_section, 'product', fallback='Top')
+count_per_request = config.getint(scraping_section, 'count_per_request', fallback=20)
 tweets_per_day = 200  # Target tweets per day
-request_delay_seconds = config.getint(scraping_section, 'request_delay_seconds', fallback=15)
+request_delay_seconds = config.getint(scraping_section, 'request_delay_seconds', fallback=10)
 max_rate_limit_retries = config.getint(scraping_section, 'max_rate_limit_retries', fallback=5)
 
 def clean_tweet_text(text):
@@ -197,7 +205,9 @@ async def main():
             # Save daily backup
             if daily_tweets:
                 df_daily = pd.DataFrame(daily_tweets)
-                daily_filename = f"bitcoin_tweets_{date_range['display']}.csv"
+                # Ensure data/tweets directory exists
+                os.makedirs("data/tweets", exist_ok=True)
+                daily_filename = f"data/tweets/bitcoin_tweets_{date_range['display']}.csv"
                 df_daily.to_csv(daily_filename, index=False, encoding='utf-8')
                 print(f"💾 Đã lưu backup: {daily_filename}")
         else:
@@ -229,7 +239,9 @@ async def main():
         
         # Save final file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        final_filename = f"bitcoin_tweets_1month_{timestamp}.csv"
+        # Ensure data/tweets directory exists
+        os.makedirs("data/tweets", exist_ok=True)
+        final_filename = f"data/tweets/bitcoin_tweets_1month_{timestamp}.csv"
         df_final.to_csv(final_filename, index=False, encoding='utf-8')
         
         print(f"\n💾 ĐÃ LƯU FILE CUỐI CÙNG: {final_filename}")

@@ -5,24 +5,40 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt 
 import seaborn as sns
+from emoji_dict import clean_emoji_text, get_emoji_stats
 
 
 def read_config_csv_path() -> str:
     config = ConfigParser()
-    config.read('config.ini')
+    try:
+        with open('config.ini', 'r', encoding='utf-8') as f:
+            config.read_file(f)
+    except FileNotFoundError:
+        config.read('config.ini')
     if 'File' not in config or 'filename' not in config['File']:
         raise ValueError("config.ini thiếu [File].filename")
     filename = config['File']['filename'].strip()
     if not filename:
         raise ValueError("Giá trị filename trong config.ini rỗng")
-    return filename
+    
+    # Tìm file trong thư mục data/tweets/
+    tweets_path = os.path.join('data', 'tweets', filename)
+    if os.path.exists(tweets_path):
+        return tweets_path
+    
+    # Nếu không tìm thấy trong data/tweets/, thử tìm ở thư mục gốc
+    if os.path.exists(filename):
+        return filename
+    
+    # Nếu không tìm thấy ở đâu, trả về đường dẫn trong data/tweets/ (sẽ báo lỗi sau)
+    return tweets_path
 
 
 def try_parse_datetime(series: pd.Series) -> pd.Series:
-    try:
-        return pd.to_datetime(series, errors='coerce', utc=True, format='ISO8601')
-    except Exception:
-        return pd.to_datetime(series.astype(str), errors='coerce', utc=True, format='ISO8601')
+    """
+    Parse datetime from various formats found in Twitter data
+    """
+    return pd.to_datetime(series.astype(str), errors='coerce', utc=True, format='%a %b %d %H:%M:%S %z %Y')
 
 
 def _ensure_output_dir(dir_path: str) -> None:

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Main Preprocessing Module for Bitcoin Price Prediction
-Tổng hợp toàn bộ pipeline preprocessing: text cleaning, segmentation, tokenization, embeddings
+Tổng hợp toàn bộ pipeline preprocessing: text cleaning, tokenization, embeddings
 
 Author: Bitcoin Price Prediction Team
 Date: 2025-09-20
@@ -17,7 +17,6 @@ warnings.filterwarnings('ignore')
 
 # Import local preprocessing modules
 from text_cleaning import clean_twitter_data
-from sentence_segmentation import segment_twitter_sentences
 from tokenization import tokenize_twitter_data
 from embeddings import generate_twitter_embeddings
 
@@ -48,9 +47,6 @@ class TwitterPreprocessingPipeline:
                 'normalize': True,
                 'keep_hashtags': True,
                 'keep_mentions': False
-            },
-            'sentence_segmentation': {
-                'method': 'hybrid'
             },
             'tokenization': {
                 'preserve_crypto': True,
@@ -145,19 +141,19 @@ class TwitterPreprocessingPipeline:
         print(f"   ✅ Output: {len(cleaned_df)} cleaned tweets")
         return cleaned_df
     
-    def step2_sentence_segmentation(self, df, text_column='text_cleaned'):
+    def step2_tokenization(self, df, text_column='text_cleaned'):
         """
-        Step 2: Segment sentences in cleaned text
+        Step 2: Tokenize cleaned text
         
         Args:
             df: DataFrame with cleaned text
             text_column: Name of the cleaned text column
             
         Returns:
-            DataFrame with segmented sentences
+            DataFrame with tokenized text
         """
         print("\n" + "="*60)
-        print("✂️ STEP 2: SENTENCE SEGMENTATION")
+        print("🔤 STEP 2: TOKENIZATION")
         print("="*60)
         
         if df.empty:
@@ -165,44 +161,6 @@ class TwitterPreprocessingPipeline:
             return df
         
         print(f"   📊 Input: {len(df)} cleaned texts")
-        print(f"   📝 Text column: '{text_column}'")
-        
-        # Perform sentence segmentation
-        segmented_df, segmentation_stats = segment_twitter_sentences(
-            df, text_column, **self.config['sentence_segmentation']
-        )
-        
-        # Store results
-        self.results['segmented_data'] = segmented_df
-        self.statistics['sentence_segmentation'] = segmentation_stats
-        
-        # Save intermediate results if requested
-        if self.config['output']['save_intermediate']:
-            self._save_intermediate_data(segmented_df, 'segmented_data')
-        
-        print(f"   ✅ Output: {len(segmented_df)} sentences")
-        return segmented_df
-    
-    def step3_tokenization(self, df, text_column='sentence'):
-        """
-        Step 3: Tokenize sentences
-        
-        Args:
-            df: DataFrame with segmented sentences
-            text_column: Name of the sentence column
-            
-        Returns:
-            DataFrame with tokenized text
-        """
-        print("\n" + "="*60)
-        print("🔤 STEP 3: TOKENIZATION")
-        print("="*60)
-        
-        if df.empty:
-            print("   ❌ Empty DataFrame provided")
-            return df
-        
-        print(f"   📊 Input: {len(df)} sentences")
         print(f"   📝 Text column: '{text_column}'")
         
         # Perform tokenization
@@ -218,12 +176,12 @@ class TwitterPreprocessingPipeline:
         if self.config['output']['save_intermediate']:
             self._save_intermediate_data(tokenized_df, 'tokenized_data')
         
-        print(f"   ✅ Output: {len(tokenized_df)} tokenized sentences")
+        print(f"   ✅ Output: {len(tokenized_df)} tokenized texts")
         return tokenized_df
     
-    def step4_embeddings_generation(self, df, tokens_column='tokens'):
+    def step3_embeddings_generation(self, df, tokens_column='tokens'):
         """
-        Step 4: Generate embeddings from tokenized text
+        Step 3: Generate embeddings from tokenized text
         
         Args:
             df: DataFrame with tokenized text
@@ -233,14 +191,14 @@ class TwitterPreprocessingPipeline:
             Dictionary with embeddings and models
         """
         print("\n" + "="*60)
-        print("🎯 STEP 4: EMBEDDINGS GENERATION")
+        print("🎯 STEP 3: EMBEDDINGS GENERATION")
         print("="*60)
         
         if df.empty:
             print("   ❌ Empty DataFrame provided")
             return {}
         
-        print(f"   📊 Input: {len(df)} tokenized sentences")
+        print(f"   📊 Input: {len(df)} tokenized texts")
         print(f"   📝 Tokens column: '{tokens_column}'")
         
         # Generate embeddings
@@ -253,7 +211,7 @@ class TwitterPreprocessingPipeline:
         if 'statistics' in embeddings_results:
             self.statistics['embeddings'] = embeddings_results['statistics']
         
-        print(f"   ✅ Generated embeddings for {len(df)} sentences")
+        print(f"   ✅ Generated embeddings for {len(df)} texts")
         return embeddings_results
     
     def run_complete_pipeline(self, df, text_column='text'):
@@ -282,22 +240,15 @@ class TwitterPreprocessingPipeline:
                 print("\n❌ Pipeline stopped: No data after text cleaning")
                 return self._prepare_final_results()
             
-            # Step 2: Sentence Segmentation
-            segmented_df = self.step2_sentence_segmentation(cleaned_df)
-            
-            if segmented_df.empty:
-                print("\n❌ Pipeline stopped: No data after sentence segmentation")
-                return self._prepare_final_results()
-            
-            # Step 3: Tokenization
-            tokenized_df = self.step3_tokenization(segmented_df)
+            # Step 2: Tokenization
+            tokenized_df = self.step2_tokenization(cleaned_df)
             
             if tokenized_df.empty:
                 print("\n❌ Pipeline stopped: No data after tokenization")
                 return self._prepare_final_results()
             
-            # Step 4: Embeddings Generation
-            embeddings_results = self.step4_embeddings_generation(tokenized_df)
+            # Step 3: Embeddings Generation
+            embeddings_results = self.step3_embeddings_generation(tokenized_df)
             
             # Prepare final results
             final_results = self._prepare_final_results()
@@ -389,10 +340,6 @@ class TwitterPreprocessingPipeline:
             stats = self.statistics['text_cleaning']
             print(f"   🧹 Text Cleaning: {stats.get('final_text_count', 'N/A')} texts")
         
-        if 'sentence_segmentation' in self.statistics:
-            stats = self.statistics['sentence_segmentation']
-            print(f"   ✂️ Sentence Segmentation: {stats.get('total_sentences', 'N/A')} sentences")
-        
         if 'tokenization' in self.statistics:
             stats = self.statistics['tokenization']
             print(f"   🔤 Tokenization: {stats.get('total_tokens', 'N/A')} tokens")
@@ -408,7 +355,7 @@ class TwitterPreprocessingPipeline:
 def preprocess_twitter_data(df, 
                           text_column='text',
                           config=None,
-                          steps=['cleaning', 'segmentation', 'tokenization', 'embeddings']):
+                          steps=['cleaning', 'tokenization', 'embeddings']):
     """
     Main function to preprocess Twitter data
     
@@ -431,7 +378,7 @@ def preprocess_twitter_data(df,
     pipeline = TwitterPreprocessingPipeline(config)
     
     # Run selected steps or complete pipeline
-    if len(steps) == 4 and all(step in ['cleaning', 'segmentation', 'tokenization', 'embeddings'] for step in steps):
+    if len(steps) == 3 and all(step in ['cleaning', 'tokenization', 'embeddings'] for step in steps):
         # Run complete pipeline
         results = pipeline.run_complete_pipeline(df, text_column)
     else:
@@ -443,15 +390,11 @@ def preprocess_twitter_data(df,
             current_df = pipeline.step1_text_cleaning(current_df, text_column)
             text_column = 'text_cleaned'
         
-        if 'segmentation' in steps and not current_df.empty:
-            current_df = pipeline.step2_sentence_segmentation(current_df, text_column)
-            text_column = 'sentence'
-        
         if 'tokenization' in steps and not current_df.empty:
-            current_df = pipeline.step3_tokenization(current_df, text_column)
+            current_df = pipeline.step2_tokenization(current_df, text_column)
         
         if 'embeddings' in steps and not current_df.empty:
-            pipeline.step4_embeddings_generation(current_df)
+            pipeline.step3_embeddings_generation(current_df)
         
         results = pipeline._prepare_final_results()
     

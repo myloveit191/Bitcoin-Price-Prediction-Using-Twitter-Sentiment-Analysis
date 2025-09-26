@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 Tokenization Module for Bitcoin Price Prediction
-Advanced tokenization using WordPiece and SentencePiece for Twitter sentences
-Focus: Subword tokenization with crypto vocabulary preservation
+Single BPE tokenization using pretrained GPT-2 tokenizer
+Focus: Merge pretrained vocabulary with crypto domain-specific tokens
 
 Author: Bitcoin Price Prediction Team
 Date: 2025-09-20
@@ -11,41 +11,29 @@ Date: 2025-09-20
 
 import re
 import os
+import sys
 import pandas as pd
 import numpy as np
-import sentencepiece as spm
-from tokenizers import Tokenizer, models, trainers, pre_tokenizers, processors, normalizers
-from tokenizers.models import WordPiece
-from tokenizers.trainers import WordPieceTrainer
-from tokenizers.normalizers import NFD, Lowercase, StripAccents
+from typing import List, Dict, Tuple, Optional, Any
+from transformers import GPT2TokenizerFast
 import warnings
-from nltk.tokenize import TweetTokenizer
 warnings.filterwarnings('ignore')
 
 class TwitterTokenizer:
-    """Class để tokenize cleaned Twitter sentences với WordPiece/SentencePiece và crypto vocabulary preservation"""
+    """BPE tokenizer for cleaned Twitter sentences using GPT-2 with domain vocab extension"""
     
-    def __init__(self, tokenizer_type='sentencepiece', vocab_size=8000, model_path=None):
+    def __init__(self, model_name: str = 'gpt2', add_domain_tokens: bool = True):
         """
-        Khởi tạo tokenizer với advanced tokenization techniques
+        Khởi tạo GPT-2 BPE tokenizer và mở rộng với crypto vocabulary
         
         Args:
-            tokenizer_type: 'sentencepiece', 'wordpiece', hoặc 'hybrid'
-            vocab_size: Kích thước vocabulary cho subword tokenization
-            model_path: Đường dẫn đến model đã train (nếu có)
+            model_name: pretrained tokenizer name (e.g., 'gpt2')
+            add_domain_tokens: có thêm crypto domain tokens vào vocab không
         """
-        self.tokenizer_type = tokenizer_type
-        self.vocab_size = vocab_size
-        self.model_path = model_path
-        
-        # Initialize basic Twitter tokenizer for preprocessing
-        self.tweet_tokenizer = TweetTokenizer(
-            preserve_case=False,
-            reduce_len=True,
-            strip_handles=False
-        )
-        
-        # Crypto vocabulary to preserve (được thêm vào special tokens)
+        self.model_name = model_name
+        self.add_domain_tokens = add_domain_tokens
+
+        # Crypto vocabulary to preserve (được thêm vào added tokens)
         self.crypto_vocabulary = {
             # Cryptocurrencies
             'bitcoin', 'btc', 'ethereum', 'eth', 'binance', 'bnb', 'cardano', 'ada',
@@ -74,284 +62,93 @@ class TwitterTokenizer:
             'binance', 'coinbase', 'kraken', 'bitfinex', 'huobi', 'okx', 'kucoin',
             'bybit', 'ftx', 'gemini', 'bitstamp', 'pancakeswap', 'uniswap', 'sushiswap'
         }
-        
-        # Initialize tokenizers
-        self.sentencepiece_model = None
-        self.wordpiece_tokenizer = None
-        self.hybrid_tokenizer = None
-        
-        # Load existing model if provided
-        if model_path and os.path.exists(os.path.dirname(model_path)):
-            self.load_model(model_path)
-        elif model_path:
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    
-    def _calculate_adaptive_vocab_size(self, texts, base_vocab_size):
-        """Calculate adaptive vocabulary size based on data size"""
-        if not texts:
-            return min(base_vocab_size, 100)
-        
-        # Count unique characters and words
-        all_text = ' '.join(texts)
-        unique_chars = len(set(all_text.lower()))
-        unique_words = len(set(all_text.lower().split()))
-        
-        # Calculate reasonable vocab size
-        # Base on unique words + crypto vocabulary + some buffer
-        crypto_vocab_size = len(self.crypto_vocabulary)
-        adaptive_size = min(
-            base_vocab_size,
-            max(100, unique_words + crypto_vocab_size + 50)
-        )
-        
-        print(f"   📊 Adaptive vocab size: {adaptive_size} (unique words: {unique_words}, crypto terms: {crypto_vocab_size})")
-        return adaptive_size
-    
-    def _create_sentencepiece_model(self, texts, model_prefix='crypto_twitter_sp'):
-        """Tạo SentencePiece model từ training data"""
-        # Calculate adaptive vocabulary size
-        adaptive_vocab_size = self._calculate_adaptive_vocab_size(texts, self.vocab_size)
-        
-        print(f"   🔧 Training SentencePiece model with vocab_size={adaptive_vocab_size}...")
-        
-        # Use model_path if available, otherwise use model_prefix
-        if self.model_path:
-            model_prefix = self.model_path
-        
-        # Prepare training data
-        temp_file = f"{model_prefix}_temp.txt"
-        with open(temp_file, 'w', encoding='utf-8') as f:
-            for text in texts:
-                if isinstance(text, str) and len(text.strip()) > 0:
-                    f.write(text.strip() + '\n')
-        
-        # Create user defined symbols for crypto vocabulary (limit to avoid issues)
-        user_defined_symbols = list(self.crypto_vocabulary)[:50]  # Limit to first 50
-        
+
+        # HF tokenizer instance
+        self.tokenizer: Optional[GPT2TokenizerFast] = None
+
+        # Load or initialize tokenizer
+        self._load_or_initialize_tokenizer()
+
+    def _load_or_initialize_tokenizer(self) -> None:
+        """Load pretrained GPT-2 tokenizer, extend with domain tokens, and ensure PAD token."""
         try:
-            # Train SentencePiece model
-            spm.SentencePieceTrainer.train(
-                input=temp_file,
-                model_prefix=model_prefix,
-                vocab_size=adaptive_vocab_size,
-                character_coverage=0.995,
-                model_type='bpe',  # Byte-pair encoding
-                user_defined_symbols=user_defined_symbols,
-                pad_id=0,
-                unk_id=1,
-                bos_id=2,
-                eos_id=3,
-                normalization_rule_name='nmt_nfkc_cf',
-                max_sentence_length=4192,
-                shuffle_input_sentence=True
-            )
-            
-            # Load the trained model
-            sp_model = spm.SentencePieceProcessor()
-            sp_model.load(f"{model_prefix}.model")
-            
-            print(f"   ✅ SentencePiece model trained successfully")
-            return sp_model
-            
+            self.tokenizer = GPT2TokenizerFast.from_pretrained(self.model_name)
+            print(f"   📥 GPT-2 tokenizer loaded: {self.model_name}")
         except Exception as e:
-            print(f"   ❌ Error training SentencePiece model: {e}")
-            print(f"   🔄 Falling back to basic tokenization...")
-            return None
-        finally:
-            # Clean up temp file
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-    
-    def _create_wordpiece_tokenizer(self, texts):
-        """Tạo WordPiece tokenizer từ training data"""
-        # Calculate adaptive vocabulary size
-        adaptive_vocab_size = self._calculate_adaptive_vocab_size(texts, self.vocab_size)
-        
-        print(f"   �� Training WordPiece tokenizer with vocab_size={adaptive_vocab_size}...")
-        
-        try:
-            # Initialize WordPiece tokenizer
-            tokenizer = Tokenizer(WordPiece(unk_token="[UNK]"))
-            
-            # Add normalizers
-            tokenizer.normalizer = normalizers.Sequence([NFD(), Lowercase(), StripAccents()])
-            
-            # Add pre-tokenizer
-            tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
-            
-            # Prepare special tokens including crypto vocabulary (limit to avoid issues)
-            special_tokens = ["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"]
-            special_tokens.extend(list(self.crypto_vocabulary)[:50])  # Limit to first 50
-            
-            # Initialize trainer
-            trainer = WordPieceTrainer(
-                vocab_size=adaptive_vocab_size,
-                special_tokens=special_tokens,
-                min_frequency=1  # Allow single occurrence
-            )
-            
-            # Train tokenizer
-            tokenizer.train_from_iterator(texts, trainer)
-            
-            print(f"   ✅ WordPiece tokenizer trained successfully")
-            return tokenizer
-            
-        except Exception as e:
-            print(f"   ❌ Error training WordPiece tokenizer: {e}")
-            print(f"   🔄 Falling back to basic tokenization...")
-            return None
-    
-    def _create_hybrid_tokenizer(self, texts):
-        """Tạo hybrid tokenizer kết hợp WordPiece và SentencePiece"""
-        print(f"   🔧 Creating hybrid tokenizer...")
-        
-        try:
-            # Create both models
-            sp_model = self._create_sentencepiece_model(texts, 'hybrid_sp')
-            wp_tokenizer = self._create_wordpiece_tokenizer(texts)
-            
-            if sp_model and wp_tokenizer:
-                print(f"   ✅ Hybrid tokenizer created successfully")
-                return {'sentencepiece': sp_model, 'wordpiece': wp_tokenizer}
-            else:
-                print(f"   ⚠️ Hybrid tokenizer creation failed, using fallback")
-                return None
-                
-        except Exception as e:
-            print(f"   ❌ Error creating hybrid tokenizer: {e}")
-            return None
-    
-    def train_tokenizer(self, texts):
+            print(f"   ❌ Error loading GPT-2 tokenizer: {e}")
+            print("   💥 Exiting program due to tokenizer initialization failure")
+            sys.exit(1)
+
+        # Ensure PAD token exists (GPT-2 lacks PAD by default)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
+
+        # Add domain tokens as added tokens (preserve as whole tokens when present)
+        if self.add_domain_tokens:
+            # Lowercase variants for Twitter text
+            domain_tokens = sorted({t.lower() for t in self.crypto_vocabulary})
+            # Avoid adding if they already exist in vocab
+            tokens_to_add = [t for t in domain_tokens if t not in self.tokenizer.get_vocab()]
+            if tokens_to_add:
+                num_added = self.tokenizer.add_tokens(tokens_to_add, special_tokens=False)
+                print(f"   ➕ Added {num_added} domain tokens to tokenizer")
+
+    def train_tokenizer(self, texts: List[str]) -> None:
         """
-        Train tokenizer trên dữ liệu texts
-        
-        Args:
-            texts: List of texts để train tokenizer
+        For GPT-2 BPE we do not train from scratch here; we rely on pretrained vocab
+        and extend with domain tokens. This method is retained for API compatibility.
         """
-        print(f"🔧 Training {self.tokenizer_type} tokenizer...")
-        
-        if not texts or len(texts) == 0:
-            print("   ❌ No training data provided")
-            return
-        
-        # Filter valid texts
-        valid_texts = [text for text in texts if isinstance(text, str) and len(text.strip()) > 0]
-        print(f"   📊 Training on {len(valid_texts)} valid texts")
-        
-        if len(valid_texts) < 5:
-            print("   ⚠️ Very small dataset, using basic tokenization")
-            return
-        
-        try:
-            if self.tokenizer_type == 'sentencepiece':
-                self.sentencepiece_model = self._create_sentencepiece_model(valid_texts)
-            elif self.tokenizer_type == 'wordpiece':
-                self.wordpiece_tokenizer = self._create_wordpiece_tokenizer(valid_texts)
-            elif self.tokenizer_type == 'hybrid':
-                self.hybrid_tokenizer = self._create_hybrid_tokenizer(valid_texts)
-            
-            print("✅ Tokenizer training completed")
-            
-        except Exception as e:
-            print(f"   ❌ Error during training: {e}")
-            print("    Will use basic tokenization as fallback")
-    
-    def tokenize_single_text(self, text, 
-                           max_length=512,
-                           add_special_tokens=True,
-                           return_tokens=True,
-                           return_ids=False):
+        if self.tokenizer is None:
+            print("   ❌ Tokenizer not available")
+            print("   💥 Exiting program due to tokenizer unavailability")
+            sys.exit(1)
+        print("✅ Tokenizer ready (pretrained GPT-2 with domain tokens)")
+
+    def tokenize_single_text(self, text: str,
+                           max_length: int = 512,
+                           add_special_tokens: bool = True,
+                           return_tokens: bool = True,
+                           return_ids: bool = False) -> Any:
         """
-        Tokenize một text đơn lẻ sử dụng trained tokenizer
+        Tokenize một text đơn lẻ sử dụng GPT-2 BPE
         
-        Args:
-            text: Input text
-            max_length: Maximum sequence length
-            add_special_tokens: Whether to add special tokens
-            return_tokens: Whether to return tokens
-            return_ids: Whether to return token IDs
-            
-        Returns:
-            Dict containing tokens and/or IDs
+        Returns dict if both tokens and ids requested, else list
         """
         if pd.isna(text) or not isinstance(text, str) or len(text.strip()) == 0:
             return {'tokens': [], 'ids': []} if return_ids else []
         
         text = text.strip().lower()
-        result = {}
-        
+        result: Dict[str, Any] = {}
+
+        if not self.tokenizer:
+            print("   ❌ Tokenizer not available")
+            print("   💥 Exiting program due to tokenizer unavailability")
+            sys.exit(1)
+
         try:
-            if self.tokenizer_type == 'sentencepiece' and self.sentencepiece_model:
-                # SentencePiece tokenization
-                if return_tokens:
-                    tokens = self.sentencepiece_model.encode_as_pieces(text)
-                    if max_length and len(tokens) > max_length:
-                        tokens = tokens[:max_length]
-                    result['tokens'] = tokens
-                
-                if return_ids:
-                    ids = self.sentencepiece_model.encode_as_ids(text)
-                    if max_length and len(ids) > max_length:
-                        ids = ids[:max_length]
-                    result['ids'] = ids
-                    
-            elif self.tokenizer_type == 'wordpiece' and self.wordpiece_tokenizer:
-                # WordPiece tokenization
-                encoding = self.wordpiece_tokenizer.encode(text, add_special_tokens=add_special_tokens)
-                
-                if return_tokens:
-                    tokens = encoding.tokens
-                    if max_length and len(tokens) > max_length:
-                        tokens = tokens[:max_length]
-                    result['tokens'] = tokens
-                
-                if return_ids:
-                    ids = encoding.ids
-                    if max_length and len(ids) > max_length:
-                        ids = ids[:max_length]
-                    result['ids'] = ids
-                    
-            elif self.tokenizer_type == 'hybrid' and self.hybrid_tokenizer:
-                # Hybrid tokenization - use both and combine results
-                sp_tokens = self.hybrid_tokenizer['sentencepiece'].encode_as_pieces(text)
-                wp_encoding = self.hybrid_tokenizer['wordpiece'].encode(text, add_special_tokens=add_special_tokens)
-                
-                # Combine tokens (prioritize SentencePiece for crypto terms)
-                combined_tokens = []
-                crypto_found = any(crypto_word in text.lower() for crypto_word in self.crypto_vocabulary)
-                
-                if crypto_found:
-                    # Use SentencePiece for crypto-heavy content
-                    combined_tokens = sp_tokens
-                else:
-                    # Use WordPiece for general content
-                    combined_tokens = wp_encoding.tokens
-                
-                if max_length and len(combined_tokens) > max_length:
-                    combined_tokens = combined_tokens[:max_length]
-                
-                result['tokens'] = combined_tokens if return_tokens else []
-                result['ids'] = wp_encoding.ids[:max_length] if return_ids else []
-            
-            else:
-                # Fallback to basic tokenization
-                basic_tokens = self.tweet_tokenizer.tokenize(text)
-                if max_length and len(basic_tokens) > max_length:
-                    basic_tokens = basic_tokens[:max_length]
-                result['tokens'] = basic_tokens if return_tokens else []
-                result['ids'] = list(range(len(basic_tokens))) if return_ids else []
-                
-        except Exception as e:
-            print(f"   ⚠️ Error in tokenization: {e}, using fallback")
-            # Fallback to basic tokenization
-            basic_tokens = self.tweet_tokenizer.tokenize(text)
-            if max_length and len(basic_tokens) > max_length:
-                basic_tokens = basic_tokens[:max_length]
-            result['tokens'] = basic_tokens if return_tokens else []
-            result['ids'] = list(range(len(basic_tokens))) if return_ids else []
+            encoding = self.tokenizer(
+                text,
+                add_special_tokens=add_special_tokens,
+                truncation=True if max_length else False,
+                max_length=max_length,
+                return_attention_mask=False,
+                return_token_type_ids=False,
+                return_offsets_mapping=False
+            )
+
+            if return_tokens:
+                tokens = self.tokenizer.convert_ids_to_tokens(encoding['input_ids'])
+                # Post-processing: loại bỏ token 'Ġ' đơn lẻ
+                tokens = [token for token in tokens if token != 'Ġ']
+                result['tokens'] = tokens
+            if return_ids:
+                result['ids'] = encoding['input_ids']
         
-        # Return format based on requirements
+        except Exception as e:
+            print(f"   ❌ Error in tokenization: {e}")
+            print("   💥 Exiting program due to tokenization failure")
+            sys.exit(1)
+        
         if return_tokens and return_ids:
             return result
         elif return_tokens:
@@ -361,38 +158,27 @@ class TwitterTokenizer:
         else:
             return result.get('tokens', [])
     
-    def tokenize_dataframe(self, df, text_column='sentence', **kwargs):
+    def tokenize_dataframe(self, df: pd.DataFrame, text_column: str = 'sentence', **kwargs) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
-        Tokenize text data trong pandas DataFrame
-        
-        Args:
-            df: Input DataFrame
-            text_column: Name of text column
-            **kwargs: Arguments for tokenize_single_text
-            
-        Returns:
-            DataFrame with tokenized text and statistics
+        Tokenize text data trong pandas DataFrame bằng GPT-2 BPE
         """
         if df.empty or text_column not in df.columns:
             print(f"   ❌ Column '{text_column}' not found or DataFrame is empty")
-            return df, {}
+            print("   💥 Exiting program due to invalid input data")
+            sys.exit(1)
         
-        print(f"   🔤 Tokenizing {len(df)} texts using {self.tokenizer_type} tokenizer...")
-        
-        # Check if tokenizer is trained
-        if (self.tokenizer_type == 'sentencepiece' and not self.sentencepiece_model) or \
-           (self.tokenizer_type == 'wordpiece' and not self.wordpiece_tokenizer) or \
-           (self.tokenizer_type == 'hybrid' and not self.hybrid_tokenizer):
-            print("   🔧 Tokenizer not trained. Training on current data...")
-            self.train_tokenizer(df[text_column].tolist())
-        
-        tokenized_data = []
+        print(f"   🔤 Tokenizing {len(df)} texts using GPT-2 BPE tokenizer...")
+
+        if not self.tokenizer:
+            print("   ❌ Tokenizer not available")
+            print("   💥 Exiting program due to tokenizer unavailability")
+            sys.exit(1)
+
+        tokenized_data: List[pd.Series] = []
         total_tokens = 0
         
         for idx, row in df.iterrows():
             text = row[text_column]
-            
-            # Get tokenization result
             token_result = self.tokenize_single_text(text, **kwargs)
             
             if isinstance(token_result, dict):
@@ -402,7 +188,6 @@ class TwitterTokenizer:
                 tokens = token_result
                 token_ids = []
             
-            # Create new row
             new_row = row.copy()
             new_row['tokens'] = tokens
             new_row['token_ids'] = token_ids
@@ -415,32 +200,28 @@ class TwitterTokenizer:
             if (idx + 1) % 1000 == 0:
                 print(f"      - Processed {idx + 1}/{len(df)} texts")
         
-        # Create DataFrame
         df_tokenized = pd.DataFrame(tokenized_data)
         
-        # Filter empty tokenizations
         original_length = len(df_tokenized)
         df_tokenized = df_tokenized[df_tokenized['token_count'] > 0]
         final_length = len(df_tokenized)
         
-        # Calculate statistics
         stats = self._calculate_tokenization_stats(df_tokenized, total_tokens, 
                                                  original_length, final_length)
         
         print(f"   ✅ Tokenization completed")
-        print(f"      - Tokenizer type: {self.tokenizer_type}")
+        print(f"      - Tokenizer type: GPT-2 BPE")
         print(f"      - Original texts: {original_length}")
         print(f"      - Final texts: {final_length}")
         print(f"      - Total tokens: {total_tokens}")
         print(f"      - Avg tokens per text: {stats['avg_tokens_per_text']:.1f}")
         
         return df_tokenized, stats
-    
-    def _calculate_tokenization_stats(self, df, total_tokens, original_length, final_length):
+
+    def _calculate_tokenization_stats(self, df: pd.DataFrame, total_tokens: int, original_length: int, final_length: int) -> Dict[str, Any]:
         """Calculate tokenization statistics"""
-        stats = {
-            'tokenizer_type': self.tokenizer_type,
-            'vocab_size': self.vocab_size,
+        stats: Dict[str, Any] = {
+            'tokenizer_type': 'gpt2-bpe',
             'original_texts': original_length,
             'final_texts': final_length,
             'removed_empty_texts': original_length - final_length,
@@ -456,7 +237,7 @@ class TwitterTokenizer:
             stats['std_tokens_per_text'] = token_counts.std()
             
             # Vocabulary statistics
-            all_tokens = []
+            all_tokens: List[str] = []
             for tokens in df['tokens']:
                 if isinstance(tokens, list):
                     all_tokens.extend(tokens)
@@ -478,110 +259,63 @@ class TwitterTokenizer:
         
         return stats
     
-    def save_model(self, save_path):
-        """Lưu trained tokenizer model"""
+    def save_model(self, save_path: str) -> None:
+        """Lưu tokenizer (Hugging Face format directory)."""
         if not save_path:
             print("   ❌ No save path provided")
-            return
-            
-        if not os.path.exists(os.path.dirname(save_path)):
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            print("   💥 Exiting program due to invalid save path")
+            sys.exit(1)
         
+        os.makedirs(save_path, exist_ok=True)
         try:
-            if self.tokenizer_type == 'sentencepiece' and self.sentencepiece_model:
-                # SentencePiece model files are already saved during training
-                # Just verify they exist
-                if os.path.exists(f"{save_path}.model"):
-                    print(f"   💾 SentencePiece model saved at {save_path}")
-                else:
-                    print(f"   ❌ SentencePiece model file not found at {save_path}.model")
-            elif self.tokenizer_type == 'wordpiece' and self.wordpiece_tokenizer:
-                self.wordpiece_tokenizer.save(save_path)
-                print(f"   💾 WordPiece tokenizer saved at {save_path}")
-            elif self.tokenizer_type == 'hybrid' and self.hybrid_tokenizer:
-                # Save both models
-                self.hybrid_tokenizer['wordpiece'].save(f"{save_path}_wp.json")
-                print(f"   💾 Hybrid tokenizer saved at {save_path}")
+            if self.tokenizer:
+                self.tokenizer.save_pretrained(save_path)
+                print(f"   💾 GPT-2 tokenizer saved at {save_path}")
+            else:
+                print("   ❌ No tokenizer to save")
+                print("   💥 Exiting program due to missing tokenizer")
+                sys.exit(1)
         except Exception as e:
-            print(f"   ❌ Error saving model: {e}")
+            print(f"   ❌ Error saving tokenizer: {e}")
+            print("   💥 Exiting program due to save failure")
+            sys.exit(1)
     
-    def load_model(self, model_path):
-        """Load trained tokenizer model"""
-        if not model_path:
-            print("   ⚠️ No model path provided")
-            return
-            
-        try:
-            if self.tokenizer_type == 'sentencepiece':
-                model_file = f"{model_path}.model"
-                if os.path.exists(model_file):
-                    self.sentencepiece_model = spm.SentencePieceProcessor()
-                    self.sentencepiece_model.load(model_file)
-                    print(f"   📂 SentencePiece model loaded from {model_path}")
-                else:
-                    print(f"   ⚠️ SentencePiece model file not found: {model_file}")
-                
-            elif self.tokenizer_type == 'wordpiece':
-                if os.path.exists(model_path):
-                    self.wordpiece_tokenizer = Tokenizer.from_file(model_path)
-                    print(f"   📂 WordPiece tokenizer loaded from {model_path}")
-                else:
-                    print(f"   ⚠️ WordPiece model file not found: {model_path}")
-                    
-            elif self.tokenizer_type == 'hybrid':
-                wp_path = f"{model_path}_wp.json"
-                sp_path = f"{model_path}.model"
-                
-                if os.path.exists(wp_path) and os.path.exists(sp_path):
-                    wp_tokenizer = Tokenizer.from_file(wp_path)
-                    sp_model = spm.SentencePieceProcessor()
-                    sp_model.load(sp_path)
-                    self.hybrid_tokenizer = {'wordpiece': wp_tokenizer, 'sentencepiece': sp_model}
-                    print(f"   📂 Hybrid tokenizer loaded from {model_path}")
-                else:
-                    print(f"   ⚠️ Hybrid model files not found: {wp_path}, {sp_path}")
-                    
-        except Exception as e:
-            print(f"   ❌ Error loading model: {e}")
-    
-    def create_vocabulary(self, df, min_frequency=2, max_vocab_size=10000):
+    def load_model(self, model_name: str) -> None:
+        """Load tokenizer từ Hugging Face Hub."""
+        if not model_name:
+            print("   ❌ No model name provided")
+            print("   💥 Exiting program due to missing model name")
+            sys.exit(1)
+        self.model_name = model_name
+        self._load_or_initialize_tokenizer()
+
+    def create_vocabulary(self, df: pd.DataFrame, min_frequency: int = 2, max_vocab_size: int = 10000) -> Dict[str, int]:
         """
-        Create vocabulary từ tokenized DataFrame
-        
-        Args:
-            df: DataFrame with tokenized text
-            min_frequency: Minimum frequency for inclusion
-            max_vocab_size: Maximum vocabulary size
-            
-        Returns:
-            Dictionary mapping tokens to indices
+        Create vocabulary từ tokenized DataFrame (analytical; independent of HF vocab)
         """
         if df.empty or 'tokens' not in df.columns:
             print("   ❌ No tokenized data found")
-            return {}
+            print("   💥 Exiting program due to invalid input data")
+            sys.exit(1)
         
         print(f"   📚 Creating vocabulary from {len(df)} texts...")
         
-        # Count token frequencies
         from collections import Counter
-        all_tokens = []
+        all_tokens: List[str] = []
         for tokens in df['tokens']:
             if isinstance(tokens, list):
                 all_tokens.extend(tokens)
         
         token_counter = Counter(all_tokens)
         
-        # Filter by frequency
-        filtered_tokens = [token for token, freq in token_counter.items() 
+        filtered_tokens = [token for token, freq in token_counter.items() \
                           if freq >= min_frequency]
         
-        # Sort by frequency and limit size
         sorted_tokens = sorted(filtered_tokens, 
                              key=lambda x: token_counter[x], 
                              reverse=True)[:max_vocab_size]
         
-        # Create vocabulary mapping
-        vocab = {'<PAD>': 0, '<UNK>': 1, '<CLS>': 2, '<SEP>': 3}  # Special tokens
+        vocab = {'<PAD>': 0, '<UNK>': 1, '<CLS>': 2, '<SEP>': 3}
         for i, token in enumerate(sorted_tokens):
             vocab[token] = i + 4
         
@@ -592,36 +326,35 @@ class TwitterTokenizer:
         
         return vocab
 
-def tokenize_twitter_data(df, text_column='sentence', tokenizer_type='sentencepiece', 
-                         vocab_size=8000, model_path=None, **tokenization_options):
+
+def tokenize_twitter_data(df: pd.DataFrame, text_column: str = 'sentence', 
+                         model_name: str = 'gpt2', add_domain_tokens: bool = True, 
+                         **tokenization_options) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
-    Main function để tokenize Twitter data với advanced techniques
+    Main function để tokenize Twitter data với single BPE (GPT-2)
     
     Args:
         df: Input DataFrame
         text_column: Name of text column
-        tokenizer_type: 'sentencepiece', 'wordpiece', hoặc 'hybrid'
-        vocab_size: Vocabulary size cho subword tokenization
-        model_path: Path to pretrained model (optional)
+        model_name: Pretrained tokenizer name (e.g., 'gpt2')
+        add_domain_tokens: Whether to add crypto domain tokens
         **tokenization_options: Additional options
-        
+    
     Returns:
         Tuple of (tokenized_dataframe, tokenization_statistics)
     """
-    print(f"🔤 Starting advanced Twitter tokenization with {tokenizer_type}...")
+    print(f"🔤 Starting BPE tokenization with GPT-2 ({model_name})...")
     
     if df.empty:
         print("   ❌ Empty DataFrame provided")
-        return df, {}
+        print("   💥 Exiting program due to empty input data")
+        sys.exit(1)
     
-    # Initialize tokenizer
     tokenizer = TwitterTokenizer(
-        tokenizer_type=tokenizer_type,
-        vocab_size=vocab_size,
-        model_path=model_path
+        model_name=model_name,
+        add_domain_tokens=add_domain_tokens
     )
     
-    # Default options
     default_options = {
         'max_length': 512,
         'add_special_tokens': True,
@@ -629,20 +362,17 @@ def tokenize_twitter_data(df, text_column='sentence', tokenizer_type='sentencepi
         'return_ids': False
     }
     
-    # Update with user options
     default_options.update(tokenization_options)
     
-    # Tokenize data
     tokenized_df, stats = tokenizer.tokenize_dataframe(df, text_column, **default_options)
     
-    print(f"✅ Advanced Twitter tokenization completed with {tokenizer_type}")
+    print(f"✅ BPE tokenization completed with GPT-2")
     return tokenized_df, stats
 
 if __name__ == "__main__":
-    # Test advanced tokenization
-    print("🧪 Testing Advanced Crypto-Aware Twitter Tokenizer...")
+    # Test BPE tokenization
+    print("🧪 Testing GPT-2 BPE Twitter Tokenizer...")
     
-    # Sample data
     test_data = {
         'sentence': [
             "bitcoin is going to the moon with diamond hands hodl",
@@ -660,31 +390,24 @@ if __name__ == "__main__":
     
     df_test = pd.DataFrame(test_data)
     
-    # Test different tokenizer types with adaptive vocab size
-    for tokenizer_type in ['sentencepiece', 'wordpiece', 'hybrid']:
-        print(f"\n{'='*50}")
-        print(f"Testing {tokenizer_type.upper()} tokenizer:")
-        print(f"{'='*50}")
+    try:
+        tokenized_df, stats = tokenize_twitter_data(
+            df_test,
+            model_name='gpt2',
+            add_domain_tokens=True,
+            max_length=50
+        )
         
-        try:
-            tokenized_df, stats = tokenize_twitter_data(
-                df_test, 
-                tokenizer_type=tokenizer_type,
-                vocab_size=500,  # Reduced from 1000
-                max_length=50,
-                model_path=f"../models/tokenizer_model_{tokenizer_type}"
-            )
-            
-            if not tokenized_df.empty:
-                print(f"\nSample tokenized results:")
-                for i, row in tokenized_df.head(3).iterrows():
-                    print(f"  Original: {row['sentence']}")
-                    print(f"  Tokens: {row['tokens']}")
-                    print(f"  Count: {row['token_count']}")
-                    print()
-            
-            print(f"Statistics: {stats}")
-            
-        except Exception as e:
-            print(f"❌ Error testing {tokenizer_type}: {e}")
-            continue 
+        if not tokenized_df.empty:
+            print(f"\nSample tokenized results:")
+            for i, row in tokenized_df.head(3).iterrows():
+                print(f"  Original: {row['sentence']}")
+                print(f"  Tokens: {row['tokens']}")
+                print(f"  Count: {row['token_count']}")
+                print()
+        
+        print(f"Statistics: {stats}")
+    except Exception as e:
+        print(f"❌ Error testing GPT-2 BPE: {e}")
+        print("💥 Exiting program due to test failure")
+        sys.exit(1) 

@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from configparser import ConfigParser
 import warnings
 warnings.filterwarnings('ignore')
+from preprocessing import preprocess_twitter_data
 
 # Import các module local (sẽ implement sau)
 # from sentiment_analysis import analyze_sentiment
@@ -51,7 +52,7 @@ def load_data(config):
         print(f"      - Date range: {twitter_df['date'].min()} to {twitter_df['date'].max()}" if 'date' in twitter_df.columns else "")
     else:
         print(f"   ❌ Twitter file not found: {tweets_path}")
-        twitter_df = pd.DataFrame()
+        sys.exit(1)
     
     # Load Bitcoin data (find latest file)
     bitcoin_files = [f for f in os.listdir('.') if f.startswith('bitcoin_price_data_') and f.endswith('.csv')]
@@ -65,11 +66,11 @@ def load_data(config):
         print(f"      - Date range: {bitcoin_df['date'].min()} to {bitcoin_df['date'].max()}" if 'date' in bitcoin_df.columns else "")
     else:
         print("   ❌ No Bitcoin data files found")
-        bitcoin_df = pd.DataFrame()
+        sys.exit(1)
     
     return twitter_df, bitcoin_df
 
-def data_preprocessing(twitter_df, bitcoin_df):
+def data_preprocessing_twitter(twitter_df):
     """Tiền xử lý dữ liệu"""
     print("\n🧹 Data Preprocessing...")
     
@@ -80,7 +81,7 @@ def data_preprocessing(twitter_df, bitcoin_df):
         
         # Import and use the preprocessing pipeline
         try:
-            from preprocessing import preprocess_twitter_data
+            
             
             # Configure preprocessing pipeline
             preprocessing_config = {
@@ -95,9 +96,6 @@ def data_preprocessing(twitter_df, bitcoin_df):
                     'normalize': True,
                     'keep_hashtags': True,
                     'keep_mentions': False
-                },
-                'sentence_segmentation': {
-                    'method': 'hybrid'
                 },
                 'tokenization': {
                     'preserve_crypto': True,
@@ -119,18 +117,6 @@ def data_preprocessing(twitter_df, bitcoin_df):
                         'min_df': 2,
                         'max_df': 0.95,
                         'ngram_range': (1, 2)
-                    },
-                    'word2vec_params': {
-                        'vector_size': 100,
-                        'window': 5,
-                        'min_count': 2,
-                        'epochs': 10
-                    },
-                    'fasttext_params': {
-                        'vector_size': 100,
-                        'window': 5,
-                        'min_count': 2,
-                        'epochs': 10
                     }
                 },
                 'output': {
@@ -140,17 +126,18 @@ def data_preprocessing(twitter_df, bitcoin_df):
                 }
             }
             
-            # Run preprocessing pipeline
+            # Run preprocessing pipeline (without sentence segmentation)
             preprocessing_results = preprocess_twitter_data(
                 twitter_df, 
                 text_column='text',
-                config=preprocessing_config
+                config=preprocessing_config,
+                steps=['cleaning', 'tokenization', 'embeddings']  # Removed 'segmentation'
             )
             
             # Extract processed data
             if 'tokenized_data' in preprocessing_results.get('data', {}):
                 processed_twitter = preprocessing_results['data']['tokenized_data']
-                print(f"      ✅ Advanced preprocessing completed: {len(processed_twitter)} processed sentences")
+                print(f"      ✅ Advanced preprocessing completed: {len(processed_twitter)} processed texts")
                 print(f"      - Generated embeddings: {list(preprocessing_results.get('data', {}).get('embeddings', {}).keys())}")
                 print(f"      - Vocabulary size: {preprocessing_results.get('statistics', {}).get('tokenization', {}).get('vocabulary_size', 'N/A')}")
                 
@@ -169,47 +156,10 @@ def data_preprocessing(twitter_df, bitcoin_df):
             print("      - Using original data")
             processed_twitter = twitter_df.copy()
     else:
-        processed_twitter = pd.DataFrame()
+        sys.exit(1)
     
-    # Bitcoin data preprocessing
-    print("   ₿ Processing Bitcoin data...")
-    if not bitcoin_df.empty:
-        print(f"      - Original records: {len(bitcoin_df)}")
-        
-        # Basic Bitcoin data preprocessing
-        processed_bitcoin = bitcoin_df.copy()
-        
-        # Parse datetime columns
-        if 'date' in processed_bitcoin.columns:
-            processed_bitcoin['date'] = pd.to_datetime(processed_bitcoin['date'])
-            print("      ✅ Parsed datetime columns")
-        
-        # Handle missing values
-        initial_nulls = processed_bitcoin.isnull().sum().sum()
-        processed_bitcoin = processed_bitcoin.dropna()
-        final_nulls = processed_bitcoin.isnull().sum().sum()
-        if initial_nulls > 0:
-            print(f"      ✅ Handled missing values: removed {initial_nulls - final_nulls} null entries")
-        
-        # Calculate price changes if price column exists
-        price_columns = ['price', 'close', 'Close', 'Price']
-        price_col = None
-        for col in price_columns:
-            if col in processed_bitcoin.columns:
-                price_col = col
-                break
-        
-        if price_col:
-            processed_bitcoin['price_change'] = processed_bitcoin[price_col].pct_change()
-            processed_bitcoin['price_change_abs'] = processed_bitcoin[price_col].diff()
-            processed_bitcoin['price_direction'] = (processed_bitcoin['price_change'] > 0).astype(int)
-            print(f"      ✅ Calculated price changes and direction from '{price_col}' column")
-        
-        print(f"      ✅ Bitcoin data processed: {len(processed_bitcoin)} records")
-    else:
-        processed_bitcoin = pd.DataFrame()
     
-    return processed_twitter, processed_bitcoin
+    return processed_twitter
 
 def sentiment_analysis(twitter_df):
     """Phân tích cảm xúc Twitter data"""
@@ -257,10 +207,10 @@ def data_synchronization(twitter_df, bitcoin_df):
     print("   ⏰ Synchronizing Twitter and Bitcoin data...")
     
     # TODO: Implement data synchronization
-    print("   📅 [TODO] Parse and standardize timestamps")
+    print("    [TODO] Parse and standardize timestamps")
     print("   🕐 [TODO] Aggregate Twitter sentiment by hour")
     print("   📊 [TODO] Merge with Bitcoin hourly data")
-    print("   🔗 [TODO] Handle missing time periods")
+    print("    [TODO] Handle missing time periods")
     print("   📈 [TODO] Create lagged features")
     
     # Placeholder result
@@ -297,7 +247,7 @@ def feature_engineering(merged_df):
     print("      - [TODO] Log returns")
     print("      - [TODO] Volatility measures")
     
-    print("   🕐 [TODO] Temporal features")
+    print("    [TODO] Temporal features")
     print("      - [TODO] Hour of day")
     print("      - [TODO] Day of week")
     print("      - [TODO] Time-based lags")
@@ -310,7 +260,7 @@ def feature_engineering(merged_df):
 
 def model_training(X, y, feature_names):
     """Training các mô hình machine learning"""
-    print("\n🤖 Model Training...")
+    print("\n Model Training...")
     
     if len(X) == 0 or len(y) == 0:
         print("   ❌ No data for model training")
@@ -320,7 +270,7 @@ def model_training(X, y, feature_names):
     
     # TODO: Implement model training
     print("   🔄 [TODO] Train/Test split (80/20)")
-    print("   📊 [TODO] Feature scaling/normalization")
+    print("    [TODO] Feature scaling/normalization")
     
     print("   🧠 [TODO] Training models:")
     print("      - [TODO] Random Forest")
@@ -354,9 +304,9 @@ def model_evaluation(models, X_test, y_test):
     print("      - [TODO] Mean Absolute Error")
     
     print("   📊 [TODO] Model comparison")
-    print("   🎯 [TODO] Feature importance analysis")
+    print("    [TODO] Feature importance analysis")
     print("   📈 [TODO] Learning curves")
-    print("   🔍 [TODO] Error analysis")
+    print("    [TODO] Error analysis")
     
     results = {}  # Placeholder
     print("   ✅ Model evaluation completed")
@@ -368,7 +318,7 @@ def generate_predictions(best_model, X_future):
     print("\n🔮 Generating Predictions...")
     
     # TODO: Implement prediction generation
-    print("   🎯 [TODO] Generate future predictions")
+    print("    [TODO] Generate future predictions")
     print("   📊 [TODO] Confidence intervals")
     print("   📈 [TODO] Trend analysis")
     print("   💾 [TODO] Save predictions to file")
@@ -405,7 +355,7 @@ def generate_report(results):
     print("   📊 [TODO] Summary statistics")
     print("   🎯 [TODO] Model performance summary")
     print("   📈 [TODO] Key insights and findings")
-    print("   🔍 [TODO] Recommendations")
+    print("    [TODO] Recommendations")
     print("   💾 [TODO] Save report to file")
     
     print("   ✅ Report generated")
@@ -414,7 +364,7 @@ def main():
     """Main pipeline function"""
     print("🚀 BITCOIN PRICE PREDICTION PIPELINE")
     print("=" * 60)
-    print("📅 Started at:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    print(" Started at:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     print("🎯 Goal: Predict Bitcoin price using Twitter sentiment")
     print("=" * 60)
     
@@ -426,10 +376,10 @@ def main():
         twitter_df, bitcoin_df = load_data(config)
         
         # 3. Data preprocessing
-        twitter_df, bitcoin_df = data_preprocessing(twitter_df, bitcoin_df)
+        processed_twitter = data_preprocessing_twitter(twitter_df)
         
         # 4. Sentiment analysis
-        twitter_with_sentiment = sentiment_analysis(twitter_df)
+        twitter_with_sentiment = sentiment_analysis(processed_twitter)
         
         # 5. Data synchronization
         merged_df = data_synchronization(twitter_with_sentiment, bitcoin_df)

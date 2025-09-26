@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Preprocessing Package for Bitcoin Price Prediction
-Tổng hợp các module preprocessing: text cleaning, segmentation, tokenization, embeddings
+Tổng hợp các module preprocessing: text cleaning, tokenization, embeddings
 
 Author: Bitcoin Price Prediction Team
 Date: 2025-09-20
@@ -11,7 +11,6 @@ Date: 2025-09-20
 # Import main functions from each module
 try:
     from .text_cleaning import clean_twitter_data, TwitterTextCleaner
-    from .sentence_segmentation import segment_twitter_sentences, TwitterSentenceSegmenter
     from .tokenization import tokenize_twitter_data, TwitterTokenizer
     from .embeddings import generate_twitter_embeddings, TwitterEmbeddingsGenerator
     from .main import preprocess_twitter_data, TwitterPreprocessingPipeline
@@ -33,14 +32,12 @@ __all__ = [
     
     # Individual step functions
     'clean_twitter_data',
-    'segment_twitter_sentences', 
     'tokenize_twitter_data',
     'generate_twitter_embeddings',
     
     # Classes
     'TwitterPreprocessingPipeline',
     'TwitterTextCleaner',
-    'TwitterSentenceSegmenter',
     'TwitterTokenizer',
     'TwitterEmbeddingsGenerator'
 ]
@@ -55,7 +52,6 @@ def get_preprocessing_info():
         'description': __description__,
         'modules': [
             'text_cleaning - HTML decoding, emoji conversion, URL removal, noise reduction',
-            'sentence_segmentation - NLTK tokenizer with Twitter-specific rules',
             'tokenization - Twitter-optimized tokenizer with crypto vocabulary',
             'embeddings - TF-IDF, Word2Vec, FastText, Sentence-BERT embeddings',
             'main - Complete preprocessing pipeline orchestrator'
